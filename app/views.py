@@ -2,6 +2,7 @@ from datetime import timedelta
 from django.db.models import Count, Sum, Q
 from django.http import JsonResponse
 from rest_framework import viewsets, response
+from rest_framework.response import Response
 from .api.serializer import *
 from .models import *
 
@@ -17,12 +18,36 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, Toke
 from django.contrib.auth import get_user_model
 
 
+# API root endpoint
+@api_view(['GET', 'HEAD'])
+@permission_classes([AllowAny])
+def api_root(request):
+    """API root page showing available endpoints"""
+    return Response({
+        "message": "Welcome to the ITS Web API",
+        "version": "1.0",
+        "endpoints": {
+            "health": request.build_absolute_uri('/api/health/'),
+            "register": request.build_absolute_uri('/api/register/'),
+            "login": request.build_absolute_uri('/api/login/'),
+            "token_refresh": request.build_absolute_uri('/api/token/refresh/'),
+            "logout": request.build_absolute_uri('/api/logout/'),
+            "authenticate": request.build_absolute_uri('/api/authenticate/'),
+            "users": request.build_absolute_uri('/api/users/'),
+            "judge_schedule": request.build_absolute_uri('/api/judge/schedule/'),
+            "judge_cases": request.build_absolute_uri('/api/judge/cases/'),
+            "judge_calendar": request.build_absolute_uri('/api/judge/calendar/'),
+            "judge_statistics": request.build_absolute_uri('/api/judge/statistics/'),
+            # Add more as needed
+        }
+    })
+
 # Health check endpoint
 @api_view(['GET', 'HEAD'])
 @permission_classes([AllowAny])
 def health_check(request):
     """Health check endpoint for monitoring"""
-    return JsonResponse({'status': 'ok'})
+    return Response({'status': 'ok'})
 
 # Custom JWT Token serializer to include user role
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
