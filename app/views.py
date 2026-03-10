@@ -18,7 +18,7 @@ from django.contrib.auth import get_user_model
 
 
 # Health check endpoint
-@api_view(['GET'])
+@api_view(['GET', 'HEAD'])
 @permission_classes([AllowAny])
 def health_check(request):
     """Health check endpoint for monitoring"""
@@ -2272,7 +2272,7 @@ def get_traffic_incidents(request):
     """
     try:
         incidents = TrafficIncident.objects.filter(is_active=True).order_by('-reported_at')[:50]
-        
+
         incident_list = []
         for incident in incidents:
             incident_list.append({
@@ -2289,12 +2289,12 @@ def get_traffic_incidents(request):
                 'reported_at': incident.reported_at.isoformat() if incident.reported_at else None,
                 'updated_at': incident.updated_at.isoformat() if incident.updated_at else None
             })
-        
+
         return JsonResponse({
             'success': True,
             'data': incident_list
         })
-    
+
     except Exception as e:
         return JsonResponse({
             'success': False,
@@ -2310,7 +2310,7 @@ def get_missing_persons(request):
     """
     try:
         missing_persons = MissingPerson.objects.filter(status='missing').order_by('-reported_at')[:30]
-        
+
         persons_list = []
         for person in missing_persons:
             persons_list.append({
@@ -2329,12 +2329,12 @@ def get_missing_persons(request):
                 'status': person.status,
                 'reported_at': person.reported_at.isoformat() if person.reported_at else None
             })
-        
+
         return JsonResponse({
             'success': True,
             'data': persons_list
         })
-    
+
     except Exception as e:
         return JsonResponse({
             'success': False,
@@ -2350,7 +2350,7 @@ def get_warrants_of_arrest(request):
     """
     try:
         warrants = WarrantOfArrest.objects.filter(status='active').order_by('-issue_date')[:30]
-        
+
         warrants_list = []
         for warrant in warrants:
             warrants_list.append({
@@ -2367,12 +2367,12 @@ def get_warrants_of_arrest(request):
                 'notes': warrant.notes,
                 'created_at': warrant.created_at.isoformat() if warrant.created_at else None
             })
-        
+
         return JsonResponse({
             'success': True,
             'data': warrants_list
         })
-    
+
     except Exception as e:
         return JsonResponse({
             'success': False,
@@ -2390,7 +2390,7 @@ def get_news(request):
         news_items = News.objects.filter(
             is_published=True
         ).order_by('-published_at')[:20]
-        
+
         news_list = []
         for news in news_items:
             news_list.append({
@@ -2404,12 +2404,12 @@ def get_news(request):
                 'published_at': news.published_at.isoformat() if news.published_at else None,
                 'expires_at': news.expires_at.isoformat() if news.expires_at else None
             })
-        
+
         return JsonResponse({
             'success': True,
             'data': news_list
         })
-    
+
     except Exception as e:
         return JsonResponse({
             'success': False,
@@ -2435,7 +2435,7 @@ def create_traffic_incident(request):
             severity=request.data.get('severity', 'medium'),
             reported_by=request.user
         )
-        
+
         return JsonResponse({
             'success': True,
             'message': 'Traffic incident reported successfully',
@@ -2447,7 +2447,7 @@ def create_traffic_incident(request):
                 'severity': incident.severity
             }
         })
-    
+
     except Exception as e:
         return JsonResponse({
             'success': False,
@@ -2462,23 +2462,23 @@ def resolve_traffic_incident(request):
     Resolve/close a traffic incident
     """
     incident_id = request.data.get('incident_id')
-    
+
     if not incident_id:
         return JsonResponse({'error': 'Incident ID required'}, status=400)
-    
+
     try:
         from django.utils import timezone
-        
+
         incident = TrafficIncident.objects.get(id=incident_id)
         incident.is_active = False
         incident.resolved_at = timezone.now()
         incident.save()
-        
+
         return JsonResponse({
             'success': True,
             'message': 'Traffic incident resolved successfully'
         })
-    
+
     except TrafficIncident.DoesNotExist:
         return JsonResponse({'error': 'Incident not found'}, status=404)
     except Exception as e:
@@ -2500,13 +2500,13 @@ def get_officer_dashboard_summary(request):
             officer = Officer.objects.get(user=request.user)
         except Officer.DoesNotExist:
             pass
-        
+
         from django.utils import timezone
         from datetime import timedelta
-        
+
         today = timezone.now().date()
         tomorrow = today + timedelta(days=1)
-        
+
         tickets_today = 0
         if officer:
             tickets_today = Ticket.objects.filter(
@@ -2514,11 +2514,11 @@ def get_officer_dashboard_summary(request):
                 date__date__gte=today,
                 date__date__lt=tomorrow
             ).count()
-        
+
         total_tickets = 0
         if officer:
             total_tickets = Ticket.objects.filter(officer=officer).count()
-        
+
         active_incidents = TrafficIncident.objects.filter(is_active=True).count()
         missing_persons = MissingPerson.objects.filter(status='missing').count()
         active_warrants = WarrantOfArrest.objects.filter(status='active').count()
@@ -2526,7 +2526,7 @@ def get_officer_dashboard_summary(request):
             is_published=True,
             published_at__gte=timezone.now() - timedelta(days=7)
         ).count()
-        
+
         return JsonResponse({
             'success': True,
             'data': {
@@ -2538,7 +2538,7 @@ def get_officer_dashboard_summary(request):
                 'recent_news': recent_news
             }
         })
-    
+
     except Exception as e:
         return JsonResponse({
             'success': False,
