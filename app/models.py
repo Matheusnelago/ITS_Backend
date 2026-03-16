@@ -580,32 +580,7 @@ class WarrantOfArrest(models.Model):
         return f"Warrant {self.warrant_number} - {self.firstname} {self.lastname}"
 
 
-class Case(models.Model):
-    """
-    Model for overdue ticket cases
-    """
-    CASE_STATUS_CHOICES = [
-        ('active', 'Active'),
-        ('closed', 'Closed'),
-        ('payment_plan', 'Payment Plan'),
-        ('court', 'Escalated to Court'),
-    ]
 
-    ticket = models.OneToOneField(
-        Ticket,
-        on_delete=models.CASCADE,
-        related_name='case'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    notes = models.TextField(blank=True, null=True)
-    status = models.CharField(
-        max_length=20,
-        choices=CASE_STATUS_CHOICES,
-        default='active'
-    )
-
-    def __str__(self):
-        return f"Case for {self.ticket.ticket_issued}"
 
 
 
