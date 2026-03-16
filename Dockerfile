@@ -11,10 +11,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY requirments.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirments.txt
+COPY requirements.txt .\n\n# Install Python dependencies\nRUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the backend directory
 COPY . .

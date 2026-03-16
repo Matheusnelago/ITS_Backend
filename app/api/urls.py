@@ -8,7 +8,16 @@ urlpatterns = [
     path('logout/', views.logout, name='logout'),
     path('authenticate/', views.is_authenticated, name='authenticate_user'),
 
-    path('judge/schedule/', views.schedule_court_date, name='judge_schedule'),
+    # Judge APIs - Updated
+    path('judge/cases/', views.get_judge_cases, name='judge_cases'),
+    path('judge/available-cases/', views.get_judge_available_cases, name='judge_available_cases'),
+    path('judge/claim-case/<int:case_id>/', views.claim_case, name='claim_case'),
+    path('judge/calendar/', views.get_judge_calendar, name='judge_calendar'),
+    path('judge/schedule/', views.schedule_judge_court_date, name='judge_schedule'),
+    path('judge/notifications/', views.get_judge_notifications, name='judge_notifications'),
+    path('judge/notifications/<int:notification_id>/read/', views.mark_judge_notification_read, name='mark_notification_read'),
+    path('judge/statistics/', views.get_judge_statistics, name='judge_statistics'),
+
     path('users/', views.get_users, name='get_users'),
     path('users/<int:user_id>/update/', views.update_user, name='update_user'),
     path('users/<int:user_id>/delete/', views.delete_user, name='delete_user'),
@@ -42,9 +51,10 @@ urlpatterns = [
     path('natis/vehicles/<int:vehicle_id>/', views.get_vehicle_by_id, name='get_vehicle_by_id'),
     path('natis/vehicles/<int:vehicle_id>/update/', views.update_vehicle, name='update_vehicle'),
 
-    # NaTIS Admin Dashboard APIs (previously missing)
+    # NaTIS Admin Dashboard APIs
     path('natis/vehicle-lookup/', views.lookup_vehicle, name='lookup_vehicle'),
     path('natis/license-verify/', views.verify_driver_license, name='verify_driver_license'),
     path('natis/payment/', views.process_payment, name='process_payment'),
     path('natis/reports/', views.generate_report, name='generate_report'),
+    path('admin/check-overdue/', views.check_overdue_tickets, name='check_overdue'),
 ]

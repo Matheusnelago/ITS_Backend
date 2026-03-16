@@ -341,7 +341,9 @@ class AuditLog(models.Model):
             ('ticket_issued', 'Ticket Issued'),
             ('ticket_paid', 'Ticket Paid'),
             ('court_date_set', 'Court Date Set'),
-            ('message_sent', 'Message Sent'),
+    ('message_sent', 'Message Sent'),
+            ('case_claimed', 'Case Claimed'),
+            ('defendant_notified', 'Defendant Notified'),
             ('attachment_added', 'Attachment Added'),
             ('user_login', 'User Login'),
             ('user_logout', 'User Logout')
@@ -578,8 +580,80 @@ class WarrantOfArrest(models.Model):
         return f"Warrant {self.warrant_number} - {self.firstname} {self.lastname}"
 
 
+class Case(models.Model):
+    """
+    Model for overdue ticket cases
+    """
+    CASE_STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('closed', 'Closed'),
+        ('payment_plan', 'Payment Plan'),
+        ('court', 'Escalated to Court'),
+    ]
+
+    ticket = models.OneToOneField(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name='case'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, null=True)
+    status = models.CharField(
+        max_length=20,
+        choices=CASE_STATUS_CHOICES,
+        default='active'
+    )
+
+    def __str__(self):
+        return f"Case for {self.ticket.ticket_issued}"
+
+
+
+class Case(models.Model):
+    """
+    Model for overdue ticket cases
+    """
+    CASE_STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('closed', 'Closed'),
+        ('payment_plan', 'Payment Plan'),
+        ('court', 'Escalated to Court'),
+    ]
+
+    ticket = models.OneToOneField(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name='case'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, null=True)
+    status = models.CharField(
+        max_length=20,
+        choices=CASE_STATUS_CHOICES,
+        default='active'
+    )
+
+    # New fields for judge assignment workflow
+    available = models.BooleanField(default=True, help_text="Available for judge assignment")
+    assigned_judge = models.ForeignKey(
+        'Judiciary',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_cases'
+    )
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    judiciary_notified = models.BooleanField(default=False, help_text="Judiciary notified of availability")
+
+    def __str__(self):
+        return f"Case for {self.ticket.ticket_issued}"
+
+
 class News(models.Model):
+
+
     """Model for news and announcements"""
+
     title = models.CharField(max_length=200)
     content = models.TextField()
     category = models.CharField(

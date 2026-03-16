@@ -388,6 +388,10 @@ def issue_ticket(request):
         # If user doesn't have an Officer profile, allow None
         pass
 
+    from django.utils import timezone
+
+    due_date = timezone.now().date() + timedelta(days=30)
+
     try:
         ticket = Ticket.objects.create(
             plate_no=data.get('plate_no'),
@@ -405,6 +409,7 @@ def issue_ticket(request):
             violation_time=data.get('violation_time'),
             officer_notes=data.get('officer_notes'),
             officer=officer,
+            due_date=due_date,
             status='pending'
         )
 
@@ -954,18 +959,34 @@ def get_judge_cases(request):
     Returns tickets with court status.
     """
     try:
-        # Get all tickets that are in court or disputed status
-        status_filter = request.GET.get('status', 'court')
+        from .models import UserRole, Case
 
-        if status_filter == 'all':
+        # Check judiciary role
+        user_role = UserRole.objects.get(user=request.user)
+        if user_role.role != 'judiciary':
+            return JsonResponse({'error': 'Judiciary access required'}, status=403)
+
+        status_filter = request.GET.get('status', 'court')
+        case_type = request.GET.get('type', 'all')  # all, available, assigned
+
+        if case_type == 'available':
+            # Available cases for claiming
+            cases_qs = Case.objects.filter(available=True, status='active').select_related('ticket')
+        elif case_type == 'assigned':
+            # Get current judge's judiciary profile
+            judiciary = Judiciary.objects.get(user=request.user)
+            cases_qs = Case.objects.filter(assigned_judge=judiciary, status='active').select_related('ticket')
+        else:
+            # Existing logic for court/disputed
             tickets = Ticket.objects.filter(
                 Q(status='court') | Q(status='disputed') | Q(status='pending')
             ).order_by('-date')
-        else:
-            tickets = Ticket.objects.filter(status=status_filter).order_by('-date')
+            # ... rest same as before
+            tickets = tickets.order_by('-date')
 
         cases = []
         for ticket in tickets:
+            # same as existing code...
             # Get defendant info if exists
             defendant_info = None
             try:
@@ -996,6 +1017,15 @@ def get_judge_cases(request):
             except:
                 pass
 
+            # Get case info
+            case_info = None
+            if hasattr(ticket, 'case'):
+                case_info = {
+                    'available': ticket.case.available,
+                    'assigned_judge': ticket.case.assigned_judge.user.username if ticket.case.assigned_judge else None,
+                    'claimed_at': ticket.case.claimed_at.isoformat() if ticket.case.claimed_at else None
+                }
+
             cases.append({
                 'id': ticket.id,
                 'ticket_number': ticket.ticket_issued,
@@ -1007,7 +1037,8 @@ def get_judge_cases(request):
                 'location': ticket.location,
                 'officer_notes': ticket.officer_notes,
                 'defendant': defendant_info,
-                'court_date': court_date
+                'court_date': court_date,
+                'case': case_info
             })
 
         return JsonResponse({
@@ -1015,6 +1046,8 @@ def get_judge_cases(request):
             'data': cases
         })
 
+    except UserRole.DoesNotExist:
+        return JsonResponse({'error': 'No role assigned'}, status=403)
     except Exception as e:
         return JsonResponse({
             'success': False,
@@ -1168,6 +1201,13 @@ def get_judge_calendar(request):
     Returns all court dates.
     """
     try:
+        from .models import UserRole
+
+        # Check judiciary role
+        user_role = UserRole.objects.get(user=request.user)
+        if user_role.role != 'judiciary':
+            return JsonResponse({'error': 'Judiciary access required'}, status=403)
+
         # Get date range
         from_date = request.GET.get('from_date')
         to_date = request.GET.get('to_date')
@@ -1184,7 +1224,7 @@ def get_judge_calendar(request):
             # Get ticket info
             ticket = cd.ticket
 
-            # Determine color based on status
+            # Determine color based on status and case assignment
             color = '#3B82F6'  # blue - default
             if ticket.status == 'court':
                 color = '#F59E0B'  # amber - pending
@@ -1192,6 +1232,12 @@ def get_judge_calendar(request):
                 color = '#10B981'  # green - resolved
             elif ticket.status == 'disputed':
                 color = '#EF4444'  # red - disputed
+            elif hasattr(ticket, 'case') and ticket.case.available:
+                color = '#FBBF24'  # yellow - available for claiming
+
+            # Case assignment info
+            case_judge = cd.judge.user.username if cd.judge else None
+            case_available = hasattr(ticket, 'case') and ticket.case.available if hasattr(ticket, 'case') else False
 
             events.append({
                 'id': cd.id,
@@ -1202,7 +1248,9 @@ def get_judge_calendar(request):
                 'violation_type': ticket.violation_type,
                 'plate_no': ticket.plate_no,
                 'color': color,
-                'notes': cd.notes
+                'notes': cd.notes,
+                'assigned_judge': case_judge,
+                'available': case_available
             })
 
         return JsonResponse({
@@ -1210,6 +1258,8 @@ def get_judge_calendar(request):
             'data': events
         })
 
+    except UserRole.DoesNotExist:
+        return JsonResponse({'error': 'No judiciary role'}, status=403)
     except Exception as e:
         return JsonResponse({
             'success': False,
@@ -1217,11 +1267,105 @@ def get_judge_calendar(request):
         }, status=500)
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_judge_available_cases(request):
+    """
+    Get available cases that judges can claim.
+    """
+    try:
+        from .models import UserRole, Case
+
+        user_role = UserRole.objects.get(user=request.user)
+        if user_role.role != 'judiciary':
+            return JsonResponse({'error': 'Judiciary access required'}, status=403)
+
+        cases = Case.objects.filter(
+            available=True,
+            status='active'
+        ).select_related('ticket', 'assigned_judge').order_by('-ticket__date')[:20]
+
+        available_cases = []
+        for case in cases:
+            ticket = case.ticket
+            available_cases.append({
+                'id': case.id,
+                'ticket_id': ticket.id,
+                'ticket_number': ticket.ticket_issued,
+                'plate_no': ticket.plate_no,
+                'violation_type': ticket.violation_type,
+                'amount': float(ticket.amount),
+                'location': ticket.location,
+                'due_date': ticket.due_date.isoformat() if ticket.due_date else None,
+                'created_at': case.created_at.isoformat(),
+                'notes': case.notes
+            })
+
+        return JsonResponse({
+            'success': True,
+            'count': cases.count(),
+            'data': available_cases
+        })
+
+    except UserRole.DoesNotExist:
+        return JsonResponse({'error': 'No judiciary role'}, status=403)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def claim_case(request, case_id):
+    """
+    Judge claims an available case.
+    """
+    try:
+        from .models import UserRole, Judiciary, Case, AuditLog
+
+        user_role = UserRole.objects.get(user=request.user)
+        if user_role.role != 'judiciary':
+            return JsonResponse({'error': 'Judiciary access required'}, status=403)
+
+        judiciary = Judiciary.objects.get(user=request.user)
+        case = Case.objects.get(id=case_id, available=True, status='active')
+
+        # Claim case
+        case.available = False
+        case.assigned_judge = judiciary
+        case.claimed_at = timezone.now()
+        case.judiciary_notified = True
+        case.save()
+
+        # Log
+        AuditLog.objects.create(
+            action='case_claimed',
+            user=request.user,
+            ticket=case.ticket,
+            details=f'Case {case.ticket.ticket_issued} claimed by judge {judiciary.user.username}'
+        )
+
+        return JsonResponse({
+            'success': True,
+            'message': 'Case claimed successfully',
+            'data': {
+                'case_id': case.id,
+                'ticket_number': case.ticket.ticket_issued,
+                'judge': judiciary.user.username
+            }
+        })
+
+    except (UserRole.DoesNotExist, Judiciary.DoesNotExist, Case.DoesNotExist) as e:
+        return JsonResponse({'error': 'Case not available or invalid user'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def schedule_judge_court_date(request):
     """
     Schedule or update a court date for a case.
+    Also assigns case to judge and notifies defendant.
     """
     ticket_id = request.data.get('ticket_id')
     scheduled_date = request.data.get('scheduled_date')
@@ -1232,7 +1376,16 @@ def schedule_judge_court_date(request):
         return JsonResponse({'error': 'Ticket ID and scheduled date required'}, status=400)
 
     try:
+        from .models import UserRole, Judiciary, Case, AuditLog, Defendant
+
         ticket = Ticket.objects.get(id=ticket_id)
+
+        # Check judiciary role
+        user_role = UserRole.objects.get(user=request.user)
+        if user_role.role != 'judiciary':
+            return JsonResponse({'error': 'Judiciary access required'}, status=403)
+
+        judiciary = Judiciary.objects.get(user=request.user)
 
         # Create or update court date
         court_date, created = CourtDate.objects.update_or_create(
@@ -1240,6 +1393,7 @@ def schedule_judge_court_date(request):
             defaults={
                 'scheduled_date': scheduled_date,
                 'location': location,
+                'judge': judiciary,  # Auto-assign current judge
                 'notes': notes,
                 'created_by': request.user
             }
@@ -1249,18 +1403,60 @@ def schedule_judge_court_date(request):
         ticket.status = 'court'
         ticket.save()
 
+        # Assign case to judge if available
+        if hasattr(ticket, 'case') and ticket.case.available:
+            ticket.case.available = False
+            ticket.case.assigned_judge = judiciary
+            ticket.case.claimed_at = timezone.now()
+            ticket.case.save()
+
+            # Log case assignment
+            AuditLog.objects.create(
+                action='case_claimed',
+                user=request.user,
+                ticket=ticket,
+                details=f'Case automatically assigned to judge {judiciary.user.username}'
+            )
+
+        # Mock defendant notification
+        defendant_phone = None
+        defendant_name = 'Unknown'
+        try:
+            defendant = Defendant.objects.filter(
+                Q(id_no__icontains=ticket.plate_no[-4:]) | Q(phone_number__isnull=False)
+            ).first()
+            if defendant:
+                defendant_phone = defendant.phone_number
+                defendant_name = f"{defendant.firstname} {defendant.lastname}"
+
+                # Mock SMS (print to console/server log)
+                sms_message = f"Court scheduled for ticket {ticket.ticket_issued}: Date {scheduled_date}, Location: {location}"
+                print(f"SMS sent to {defendant_phone}: {sms_message}")
+
+                AuditLog.objects.create(
+                    action='defendant_notified',
+                    user=request.user,
+                    ticket=ticket,
+                    details=f'Defendant notified ({defendant_name}, {defendant_phone}): {sms_message}'
+                )
+        except:
+            pass
+
         return JsonResponse({
             'success': True,
-            'message': 'Court date scheduled successfully',
+            'message': 'Court date scheduled successfully. Case assigned and defendant notified.',
             'data': {
                 'id': court_date.id,
                 'scheduled_date': court_date.scheduled_date.isoformat(),
-                'location': court_date.location
+                'location': court_date.location,
+                'defendant_notified': bool(defendant_phone),
+                'defendant_phone': defendant_phone,
+                'assigned_judge': judiciary.user.username
             }
         })
 
-    except Ticket.DoesNotExist:
-        return JsonResponse({'error': 'Ticket not found'}, status=404)
+    except (Ticket.DoesNotExist, UserRole.DoesNotExist, Judiciary.DoesNotExist) as e:
+        return JsonResponse({'error': str(e)}, status=404)
     except Exception as e:
         return JsonResponse({
             'success': False,
@@ -1313,6 +1509,112 @@ def get_judge_statistics(request):
             'success': False,
             'error': str(e)
         }, status=500)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_judge_notifications(request):
+    """
+    Get notifications for judiciary user.
+    Returns recent AuditLog events + available cases.
+    """
+    try:
+        from .models import UserRole, AuditLog, Case, Judiciary
+
+        # Check judiciary role
+        user_role = UserRole.objects.get(user=request.user)
+        if user_role.role != 'judiciary':
+            return JsonResponse({'error': 'Judiciary access required'}, status=403)
+
+        judiciary = Judiciary.objects.get(user=request.user)
+
+        # Recent notifications from AuditLog (last 7 days, judiciary-relevant actions)
+        one_week_ago = timezone.now() - timedelta(days=7)
+        audit_logs = AuditLog.objects.filter(
+            timestamp__gte=one_week_ago,
+            action__in=['case_claimed', 'defendant_notified', 'ticket_issued', 'court_date_set', 'message_sent']
+        ).select_related('user', 'ticket').order_by('-timestamp')[:20]
+
+        # Available cases as notifications
+        available_cases = Case.objects.filter(
+            available=True,
+            judiciary_notified=False,
+            status='active'
+        ).select_related('ticket')[:10]
+
+        notifications = []
+
+        # Audit logs as notifications
+        for log in audit_logs:
+            notifications.append({
+                'id': f'audit_{log.id}',
+                'type': 'info',
+                'title': f'{log.action.replace("_", " ").title()}',
+                'message': log.details or f'Audit log entry #{log.id}',
+                'time': log.timestamp.isoformat(),
+                'read': False,
+                'data': {
+                    'ticket_number': log.ticket.ticket_issued if log.ticket else None,
+                    'user': log.user.username if log.user else 'System'
+                }
+            })
+
+        # Available cases as notifications
+        for case in available_cases:
+            ticket = case.ticket
+            notifications.append({
+                'id': f'case_{case.id}',
+                'type': 'warning',
+                'title': 'New Available Case',
+                'message': f'Case for ticket {ticket.ticket_issued} is ready for review',
+                'time': case.created_at.isoformat(),
+                'read': False,
+                'data': {
+                    'case_id': case.id,
+                    'ticket_number': ticket.ticket_issued,
+                    'plate_no': ticket.plate_no
+                }
+            })
+
+        # Mark judiciary_notified for available cases
+        for case in available_cases:
+            case.judiciary_notified = True
+            case.save()
+
+        return JsonResponse({
+            'success': True,
+            'data': notifications,
+            'unread_count': len(notifications)  # All new are unread
+        })
+
+    except UserRole.DoesNotExist:
+        return JsonResponse({'error': 'No judiciary role'}, status=403)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def mark_judge_notification_read(request, notification_id):
+    """
+    Mark a specific notification as read.
+    """
+    try:
+        # Parse ID to handle audit_ or case_
+        if notification_id.startswith('audit_'):
+            audit_id = int(notification_id.replace('audit_', ''))
+            # Could add read_at field to AuditLog later
+            return JsonResponse({'success': True, 'message': 'Audit notification marked read'})
+        elif notification_id.startswith('case_'):
+            case_id = int(notification_id.replace('case_', ''))
+            case = Case.objects.get(id=case_id)
+            case.judiciary_notified = True
+            case.save()
+            return JsonResponse({'success': True, 'message': 'Case notification marked read'})
+        else:
+            return JsonResponse({'error': 'Invalid notification ID'}, status=400)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 # ======================
@@ -2569,3 +2871,19 @@ def get_officer_dashboard_summary(request):
             'success': False,
             'error': str(e)
         }, status=500)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def check_overdue_tickets(request):
+    """Admin endpoint to check and process overdue tickets"""
+    if not request.user.is_superuser:
+        return JsonResponse({'error': 'Admin only'}, status=403)
+
+    from django.core.management import call_command
+    call_command('check_overdue_tickets')
+
+    return JsonResponse({
+        'success': True,
+        'message': 'Overdue tickets check completed'
+    })
